@@ -93,7 +93,20 @@ func TestLimiter_Middleware(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db, mock := redismock.NewClientMock()
 
-			limiter := New(db, 5, windowDuration)
+			var (
+				allowedCalled bool
+				limitedCalled bool
+				errorCalled   bool
+			)
+
+			limiter := New(
+				db,
+				5,
+				windowDuration,
+				WithOnAllowed(func(key string, r *http.Request) { allowedCalled = true }),
+				WithOnLimited(func(key string, r *http.Request) { limitedCalled = true }),
+				WithOnError(func(err error) { errorCalled = true }),
+			)
 			limiter.Now = func() time.Time { return mockTime }
 
 			if tt.name == "Redis Down - Fail Closed" {
@@ -110,7 +123,6 @@ func TestLimiter_Middleware(t *testing.T) {
 			handler := limiter.Middleware(nextHandler)
 			handler.ServeHTTP(rr, req)
 
-			// 5. Assertions
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("wrong status code: got %v want %v", status, tt.expectedStatus)
 			}
@@ -126,6 +138,33 @@ func TestLimiter_Middleware(t *testing.T) {
 
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Errorf("unfulfilled redis mock expectations: %s", err)
+			}
+
+			switch tt.name {
+			case "Allowed - Under Limit":
+				if !allowedCalled {
+					t.Errorf("expected onAllowed to be called")
+				}
+				if limitedCalled {
+					t.Errorf("did not expect onLimited to be called")
+				}
+				if errorCalled {
+					t.Errorf("did not expect onError to be called")
+				}
+			case "Denied - Over Limit":
+				if !limitedCalled {
+					t.Errorf("expected onLimited to be called")
+				}
+				if allowedCalled {
+					t.Errorf("did not expect onAllowed to be called")
+				}
+				if errorCalled {
+					t.Errorf("did not expect onError to be called")
+				}
+			case "Redis Down - Fail Open (default)", "Redis Down - Fail Closed":
+				if !errorCalled {
+					t.Errorf("expected onError to be called")
+				}
 			}
 		})
 	}
