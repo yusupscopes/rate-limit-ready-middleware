@@ -2,7 +2,6 @@ package limiter
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -32,6 +31,11 @@ type headerConfig struct {
 // Option is a functional option for configuring a Limiter.
 type Option func(*Limiter)
 
+// Logger is the minimal logging interface used by the limiter.
+type Logger interface {
+	Printf(format string, v ...any)
+}
+
 // Limiter implements a sliding-window log rate limiter backed by Redis.
 // It is safe for concurrent use by multiple goroutines.
 type Limiter struct {
@@ -44,6 +48,10 @@ type Limiter struct {
 	keyFunc     func(*http.Request) string
 	headers     headerConfig
 	failureMode FailureMode
+	logger      Logger
+	onAllowed   func(key string, r *http.Request)
+	onLimited   func(key string, r *http.Request)
+	onError     func(err error)
 }
 
 // New constructs a Limiter with the given Redis client, maximum number of
@@ -67,6 +75,7 @@ func New(client *redis.Client, limit int64, window time.Duration, opts ...Option
 			remainingHeader: "X-RateLimit-Remaining",
 		},
 		failureMode: FailOpen,
+		logger:      noopLogger{},
 	}
 
 	for _, opt := range opts {
@@ -110,6 +119,43 @@ func WithFailureMode(mode FailureMode) Option {
 	}
 }
 
+// WithLogger configures a custom logger implementation used for internal
+// diagnostics (for example, Redis errors). If nil is provided, logging is
+// disabled.
+func WithLogger(logger Logger) Option {
+	return func(l *Limiter) {
+		if logger == nil {
+			l.logger = noopLogger{}
+			return
+		}
+		l.logger = logger
+	}
+}
+
+// WithOnAllowed registers a callback that is invoked when a request is
+// successfully allowed by the limiter.
+func WithOnAllowed(fn func(key string, r *http.Request)) Option {
+	return func(l *Limiter) {
+		l.onAllowed = fn
+	}
+}
+
+// WithOnLimited registers a callback that is invoked when a request is
+// rejected due to exceeding the configured limit.
+func WithOnLimited(fn func(key string, r *http.Request)) Option {
+	return func(l *Limiter) {
+		l.onLimited = fn
+	}
+}
+
+// WithOnError registers a callback that is invoked when a Redis error
+// occurs while evaluating the rate limit.
+func WithOnError(fn func(err error)) Option {
+	return func(l *Limiter) {
+		l.onError = fn
+	}
+}
+
 // defaultKeyFunc returns a key derived from the request. It prefers the
 // left-most X-Forwarded-For value when present (assuming a trusted proxy
 // in front of the application), otherwise it falls back to the remote IP.
@@ -132,6 +178,10 @@ func defaultKeyFunc(r *http.Request) string {
 	return strings.TrimSpace(parts[0])
 }
 
+type noopLogger struct{}
+
+func (noopLogger) Printf(string, ...any) {}
+
 func (rl *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -152,7 +202,10 @@ func (rl *Limiter) Middleware(next http.Handler) http.Handler {
 
 		_, err := pipe.Exec(ctx)
 		if err != nil {
-			log.Printf("Rate limiter Redis error: %v", err)
+			rl.logger.Printf("Rate limiter Redis error: %v", err)
+			if rl.onError != nil {
+				rl.onError(err)
+			}
 			if rl.failureMode == FailClosed {
 				http.Error(w, "service unavailable due to rate limiting backend error", http.StatusServiceUnavailable)
 				return
@@ -173,8 +226,15 @@ func (rl *Limiter) Middleware(next http.Handler) http.Handler {
 		}
 
 		if requestsThisWindow > rl.limit {
+			if rl.onLimited != nil {
+				rl.onLimited(key, r)
+			}
 			http.Error(w, "429 Too Many Requests - Rate limit exceeded", http.StatusTooManyRequests)
 			return
+		}
+
+		if rl.onAllowed != nil {
+			rl.onAllowed(key, r)
 		}
 
 		next.ServeHTTP(w, r)

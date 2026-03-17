@@ -10,7 +10,7 @@ on:
 
 jobs:
   test:
-    name: Run Unit Tests
+    name: Run Unit Tests and Lint
     runs-on: ubuntu-latest
 
     steps:
@@ -29,6 +29,20 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      # 4. Run the tests with verbose output and race condition checking
+      # 4. Install golangci-lint
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61.0
+
+      # 5. Run the tests with verbose output and race condition checking
       - name: Run tests
         run: go test -v -race ./...
+
+      # 6. Run benchmarks
+      - name: Run benchmarks
+        run: go test -bench=. ./...
+
+      # 7. Run golangci-lint
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
