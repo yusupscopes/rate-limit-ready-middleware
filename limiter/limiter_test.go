@@ -23,7 +23,9 @@ func ExampleLimiter_basic() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("OK\n"))
+		if _, err := w.Write([]byte("OK\n")); err != nil {
+			log.Printf("failed to write response: %v", err)
+		}
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", rateLimiter.Middleware(mux)))
