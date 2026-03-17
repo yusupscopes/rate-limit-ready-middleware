@@ -1,0 +1,34 @@
+name: Go Tests
+
+# This workflow will trigger on every push to the main branch
+# and every time a Pull Request is opened against main.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Set up the Go environment
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1" # Match the version in your go.mod
+          cache: true # Speeds up subsequent runs by caching dependencies
+
+      # 3. Download Go modules
+      - name: Install dependencies
+        run: go mod download
+
+      # 4. Run the tests with verbose output and race condition checking
+      - name: Run tests
+        run: go test -v -race ./...
