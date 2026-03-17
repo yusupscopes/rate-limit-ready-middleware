@@ -50,4 +50,3 @@ func BenchmarkLimiter_Allow(b *testing.B) {
 func BenchmarkLimiter_Denied(b *testing.B) {
 	benchmarkLimiter(b, 6)
 }
-
