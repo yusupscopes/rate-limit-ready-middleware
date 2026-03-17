@@ -3,6 +3,7 @@ package limiter
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -12,6 +13,47 @@ import (
 	"github.com/go-redis/redismock/v9"
 	"github.com/redis/go-redis/v9"
 )
+
+func ExampleLimiter_basic() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	rateLimiter := New(rdb, 100, time.Minute)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("OK\n"))
+	})
+
+	log.Fatal(http.ListenAndServe(":8080", rateLimiter.Middleware(mux)))
+}
+
+func ExampleLimiter_withOptions() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	logger := log.New(log.Writer(), "[rate-limiter] ", log.LstdFlags)
+
+	userKeyFunc := func(r *http.Request) string {
+		if id := r.Header.Get("X-User-ID"); id != "" {
+			return id
+		}
+		return "anonymous"
+	}
+
+	rateLimiter := New(
+		rdb,
+		50,
+		time.Minute,
+		WithKeyFunc(userKeyFunc),
+		WithFailureMode(FailClosed),
+		WithLogger(logger),
+	)
+
+	_ = rateLimiter
+}
 
 func TestLimiter_Middleware(t *testing.T) {
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

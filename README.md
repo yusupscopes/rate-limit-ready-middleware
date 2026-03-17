@@ -2,6 +2,38 @@
 
 A production-ready, highly concurrent HTTP rate-limiting middleware written in Go. It utilizes Redis to share state across multiple server instances, ensuring accurate limits across distributed architectures.
 
+## Quickstart
+
+```go
+package main
+
+import (
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"github.com/yusupscopes/rate-limit-ready-middleware/limiter"
+)
+
+func main() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	// 100 requests per minute per client (per IP)
+	rateLimiter := limiter.New(rdb, 100, time.Minute)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("OK\n"))
+	})
+
+	log.Println("listening on :8080")
+	log.Fatal(http.ListenAndServe(":8080", rateLimiter.Middleware(mux)))
+}
+```
+
 ## 🚀 Features
 
 - **Sliding Window Log Algorithm**: Eliminates the "boundary spike" flaw found in traditional fixed-window limiters by using Redis Sorted Sets (`ZSET`).
@@ -46,7 +78,7 @@ Create a `Dockerfile` in the root of your project:
 
 ```dockerfile
 # Build stage
-FROM golang:1.26.1-alpine AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -141,6 +173,12 @@ The server will start on `http://localhost:8080` with a default limit of 50 requ
 
 ## Usage
 
+There are runnable examples under `examples/`:
+
+- `examples/basic`: default per-IP limiting.
+- `examples/user-key-failclosed`: user-ID keying with fail-closed behavior.
+- `examples/custom-logger-hooks`: custom logger and hooks.
+
 ### Basic usage (defaults: IP-based key, headers on, fail-open)
 
 The simplest way to use this library is to construct a `Limiter` with a Redis client, a maximum number of requests, and a window duration. By default, it:
@@ -210,6 +248,58 @@ rateLimiter := limiter.New(
 
 You can then wrap any `http.Handler` (or router) with `rateLimiter.Middleware(...)` as shown above.
 
+## Configuration
+
+### Options
+
+The limiter supports functional options to customize behavior:
+
+- `WithKeyFunc(func(*http.Request) string)`: derive the rate-limit key from the request (default: IP with conservative `X-Forwarded-For` handling).
+- `WithHeaders(enabled bool, limitHeader, remainingHeader string)`: enable/disable headers and override header names.
+- `WithFailureMode(FailureMode)`: choose how to behave when Redis is unavailable.
+- `WithLogger(Logger)`: inject a custom logger for internal diagnostics.
+- `WithOnAllowed(func(key string, r *http.Request))`: hook called when a request is allowed.
+- `WithOnLimited(func(key string, r *http.Request))`: hook called when a request is rejected due to limits.
+- `WithOnError(func(err error))`: hook called when a Redis error occurs.
+
+### Failure modes
+
+`FailureMode` controls behavior on Redis errors:
+
+- `FailOpen` (default): log the error and allow the request to proceed.
+- `FailClosed`: reject the request (503) when Redis is unavailable.
+
+### Keying and proxies
+
+By default, the limiter:
+
+- Uses the left-most `X-Forwarded-For` value when present (assuming a trusted proxy/load balancer).
+- Falls back to the remote IP from `RemoteAddr` otherwise.
+
+If you are behind an untrusted proxy or want to rate-limit by user ID or API key, prefer a custom key function via `WithKeyFunc`.
+
+## Development
+
+- **Run tests**:
+
+  ```bash
+  go test ./...
+  ```
+
+- **Run benchmarks**:
+
+  ```bash
+  go test -bench=. ./limiter
+  ```
+
+- **Run linting** (if `golangci-lint` is installed):
+
+  ```bash
+  golangci-lint run ./...
+  # or
+  make lint
+  ```
+
 ## 🚦 Load Testing
 
 To see the rate limiter in action and verify the boundary spike protection, you can use a load-testing tool like [hey](https://github.com/rakyll/hey).
@@ -231,3 +321,18 @@ Status code distribution:
   [200] 50 responses
   [429] 150 responses
 ```
+
+## Production deployment
+
+- **Redis sizing**
+  - Keys are created per client key (IP or custom key) and expire after the configured window.
+  - Ensure Redis has enough memory for the expected number of active clients × windows.
+  - Use Redis monitoring to watch key counts and memory usage.
+
+- **Reverse proxies and IPs**
+  - When sitting behind a trusted reverse proxy or load balancer, ensure it sets `X-Forwarded-For` correctly.
+  - If you cannot trust `X-Forwarded-For`, prefer a custom `WithKeyFunc` based on authenticated user ID or API key.
+
+- **Observability**
+  - Use `WithLogger` to route limiter diagnostics into your logging stack.
+  - Use hooks (`WithOnAllowed`, `WithOnLimited`, `WithOnError`) to emit metrics or structured events when requests are allowed, limited, or when Redis errors occur.
