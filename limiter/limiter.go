@@ -2,6 +2,7 @@ package limiter
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -75,7 +76,7 @@ func New(client *redis.Client, limit int64, window time.Duration, opts ...Option
 			remainingHeader: "X-RateLimit-Remaining",
 		},
 		failureMode: FailOpen,
-		logger:      noopLogger{},
+		logger:      log.Default(),
 	}
 
 	for _, opt := range opts {

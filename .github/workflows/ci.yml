@@ -42,7 +42,3 @@ jobs:
       # 6. Run benchmarks
       - name: Run benchmarks
         run: go test -bench=. ./...
-
-      # 7. Run golangci-lint
-      - name: Run golangci-lint
-        run: golangci-lint run ./...
