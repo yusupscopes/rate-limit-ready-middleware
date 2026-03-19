@@ -51,16 +51,16 @@ To make the system both effective and production-ready:
 
 ### Measurable Results
 
-- ✅ Enforced strict request limits with **100% accuracy during load testing**
-- ✅ Successfully handled concurrent traffic without performance degradation
-- ✅ Prevented system overload by rejecting excess requests in real time
+- ✅ Enforced strict request limits with **100% observed accuracy in our 200-request, concurrency-10 load test** on a single app instance backed by one Redis node.
+- ✅ Successfully handled concurrent traffic **under the tested load profile** (200 total requests at concurrency 10) with no material degradation observed in our benchmark run.
+- ✅ Prevented system overload by rejecting excess requests **during the same benchmark window**, i.e., in real time under the tested load rather than as a universal guarantee.
 
 ### Business Impact
 
-- Improved **system reliability and uptime** under high traffic
-- Protected infrastructure from **abuse and unexpected spikes**
-- Ensured **fair access for all users**, improving overall experience
-- Reduced risk of downtime, leading to more **stable service delivery**
+- Expected (first 90 days post-rollout): Improved **system reliability and uptime** under high traffic.
+- Expected (first 90 days post-rollout): Better protection against **abuse and unexpected spikes** through enforced request caps.
+- Expected (first 90 days post-rollout): More **fair access for users** by limiting burst-heavy clients and smoothing traffic distribution.
+- Expected (first 90 days post-rollout): Lower downtime risk and more **stable service delivery** during peak periods.
 
 ---
 
